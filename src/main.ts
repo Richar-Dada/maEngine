@@ -13,8 +13,14 @@ const canvas: HTMLCanvasElement | null = document.getElementById('canvas') as HT
 const ma = new MAEngine(canvas)
 ma.run()
 // ma.loadFbx('public/fbx/Samba Dancing.fbx')
-ma.loadGltf('DamagedHelmet.gltf')
-    .then(() => {
-        ma.openClip()
+ma.loadGltf('LeePerrySmith.glb')
+    .then((mesh) => {
+        ma.openClip(mesh)
 
     })
+
+// ma.loadFbx('public/fbx/Samba Dancing.fbx')
+// .then(() => {
+//     ma.openClip()
+
+// })

@@ -2,12 +2,12 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three-orbitcontrols-ts'
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader'
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader'
 import { RoughnessMipmapper } from 'three/examples/jsm/utils/RoughnessMipmapper'
 
 import { Application } from './Application'
 import { MaConfigType } from './MAEngine'
 import Clip from '../lib/Clip'
-import { Object3D } from 'three'
 
 export default class ThreeApplication extends Application {
 
@@ -20,7 +20,7 @@ export default class ThreeApplication extends Application {
     clock: THREE.Clock | null = null
     control: OrbitControls | null = null
     config: MaConfigType| null = null
-    currentObj: Object3D| null = null
+    clip: Clip | null = null
 
     constructor(canvas: HTMLCanvasElement, config: MaConfigType) {
         super(canvas)
@@ -36,8 +36,8 @@ export default class ThreeApplication extends Application {
 
     private initThree(): void {
         
-        this.camera = new THREE.PerspectiveCamera( 45, this.canvas.width / this.canvas.height, 0.25, 20);
-        this.camera.position.set( - 1.8, 0.6, 3.7  )
+        this.camera = new THREE.PerspectiveCamera( 45, this.canvas.width / this.canvas.height, 0.5, 200);
+        this.camera.position.set( - 18, 6, 3.7  )
 
         this.scene = new THREE.Scene()
         this.scene.background = new THREE.Color( 0xa0a0a0 );
@@ -61,6 +61,9 @@ export default class ThreeApplication extends Application {
         this.renderer.setPixelRatio( window.devicePixelRatio )
 
         this.clock = new THREE.Clock()
+
+        const ax = new THREE.AxesHelper(1000)
+        this.scene.add(ax)
     }
 
     public stupControl(): void {
@@ -72,87 +75,99 @@ export default class ThreeApplication extends Application {
         this.control.enableZoom = true
     }
 
-    public loadFbx(url: string): void {
-        const that = this
-        const loader = new FBXLoader()
-        loader.load( url, ( object ) =>{
+    public loadFbx(url: string): Promise<void> {
+        return new Promise((resolve, reject) => {
+            const that = this
+            const loader = new FBXLoader()
+            loader.load( url, ( object ) =>{
+                
+                that.mixer = new THREE.AnimationMixer( object );
 
-            that.mixer = new THREE.AnimationMixer( object );
+                const action = that.mixer.clipAction( object.animations[ 0 ] );
+                action.play();
 
-            const action = that.mixer.clipAction( object.animations[ 0 ] );
-            action.play();
+                object.traverse( function ( child ) {
 
-            object.traverse( function ( child ) {
+                    if ( child.isMesh ) {
 
-                if ( child.isMesh ) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
 
-                    child.castShadow = true;
-                    child.receiveShadow = true;
+                    }
 
-                }
+                } )
+
+                that.scene?.add( object );
+                resolve()
 
             } )
-
-            that.scene?.add( object );
-
-        } )
+        })
+        
     }
 
-    public loadGltf(url: string): Promise<void> {
+    public loadGltf(url: string): Promise<object> {
         return new Promise((resolve, reject) => {
             const that = this
             const roughnessMipmapper = new RoughnessMipmapper( this.renderer )
-            const loader = new GLTFLoader().setPath( 'public/gltf/' );
+
+            const dracoLoader = new DRACOLoader()
+            dracoLoader.setDecoderPath( 'node_modules/three/examples/js/libs/draco/gltf/' )
+
+            const loader = new GLTFLoader().setPath( 'public/gltf/' )
+            loader.setDRACOLoader( dracoLoader )
             loader.load( url, function ( gltf ) {
-                that.currentObj = gltf.scene
 
                 gltf.scene.traverse( function ( child ) {
 
                     if ( child.isMesh ) {
 
-                        // TOFIX RoughnessMipmapper seems to be broken with WebGL 2.0
-                        // roughnessMipmapper.generateMipmaps( child.material );
-                        const geometry = child.geometry
-                        console.log(geometry.boundingBox)
-
-                        geometry.computeVertexNormals();
-                        geometry.center();
-                        const material = new THREE.MeshPhongMaterial({color: 0xffff00, shading: THREE.SmoothShading});
-                        const mesh = new THREE.Mesh(geometry, material);
-                        var scale = 1.5
-                        mesh.scale.multiplyScalar(scale);
-                        mesh.position.set(0, 0, 0);
-                        that.scene?.add(mesh)
-                        resolve()
+                        resolve(child)
 
                     }
 
-
                 } );
 
-                that.scene?.add( gltf.scene );
 
                 roughnessMipmapper.dispose();
-
 
             } );
         })
     }
 
-    public openClip(): void {
-        console.log('openClip')
-        if (!this.currentObj || !this.scene || !this.renderer || !this.camera || !this.control) return
+    public openClip(mesh: THREE.Mesh): void {
+        if (!this.scene || !this.renderer || !this.camera || !this.control) return
 
-        const clip = new Clip(this.currentObj, this.scene, this.renderer, this.camera, this.control)
-        clip.open()
+        this.renderer.localClippingEnabled = true
+        this.renderer.autoClear = false
+        this.clip = new Clip(mesh, this, this.scene, this.renderer, this.camera, this.control)
+        this.clip.open()
     }
 
     public render(): void {
         if (this.scene && this.camera) {
             const delta = this.clock?.getDelta();
 
+            // const planeObjects = this.clip?.clipBox.planeObjects
+            // const planes = this.clip?.clipBox.planes
+            // if (planes && planeObjects && planeObjects.length > 0) {
+            //     for (var i = 0; i < planeObjects.length; i++) {
+        
+            //         var plane = planes[i];
+            //         var po = planeObjects[i];
+            //         plane.coplanarPoint(po.position);
+            //         po.lookAt(
+            //             po.position.x - plane.normal.x,
+            //             po.position.y - plane.normal.y,
+            //             po.position.z - plane.normal.z,
+            //         );
+        
+            //     }
+            // }
+
 			if ( this.mixer ) this.mixer.update( delta! )
             this.renderer?.render( this.scene, this.camera )
+
+            
         }
     }    
 }

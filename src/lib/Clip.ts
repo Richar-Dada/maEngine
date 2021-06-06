@@ -2,7 +2,6 @@ import {
     Object3D, 
     Scene, 
     BufferGeometry, 
-    ShapeBufferGeometry,
     Vector3, 
     Group, 
     Mesh, 
@@ -17,19 +16,22 @@ import {
     Raycaster,
     Vector2,
     Camera,
-    PlaneGeometry
+    PlaneGeometry,
 } from 'three'
 
+import * as THREE from 'three'
 import { OrbitControls } from 'three-orbitcontrols-ts'
+import ThreeApplication from '../core/ThreeApplication'
 
 export default class Clip {
     // (1)基本数据
     private obj: Object3D;
+    private app: ThreeApplication
     private scene: Scene;
     private renderer: WebGLRenderer
     private camera: Camera
     private controls: OrbitControls
-    private clipBox: ClipBox;
+    public clipBox: ClipBox;
     public isOpen: boolean = false
 
     // (1)基本数据
@@ -37,9 +39,9 @@ export default class Clip {
     private mouse: Vector2 = new Vector2(); // 鼠标坐标点
     private activeFace: BoxFace | null = null; // 鼠标碰触的面
 
-    constructor(obj: Object3D, scene: Scene, renderer: WebGLRenderer, camera: Camera, controls: OrbitControls) {
-        console.log('gg')
+    constructor(obj: Object3D, app: ThreeApplication, scene: Scene, renderer: WebGLRenderer, camera: Camera, controls: OrbitControls) {
         this.obj = obj
+        this.app = app
         this.scene = scene
         this.renderer = renderer
         this.camera = camera
@@ -74,8 +76,8 @@ export default class Clip {
     }
 
     private updateMouseAndRay(event: MouseEvent): void {
-        this.mouse.setX((event.clientX / window.innerWidth) * 2 - 1);
-        this.mouse.setY(-(event.clientY / window.innerHeight) * 2 + 1);
+        this.mouse.setX((event.clientX / this.app.canvas.width) * 2 - 1);
+        this.mouse.setY(-(event.clientY / this.app.canvas.height) * 2 + 1);
         this.raycaster.setFromCamera(this.mouse, this.camera);
     }
 
@@ -83,7 +85,6 @@ export default class Clip {
         this.updateMouseAndRay(event)
         const intersects = this.raycaster.intersectObjects(this.clipBox.faces); // 鼠标与剖切盒的面的相交情况
         if (intersects.length) {
-            console.log('1')
             this.renderer.domElement.style.cursor = 'pointer';
             const face = intersects[0].object as BoxFace;
             if (face !== this.activeFace) {
@@ -94,7 +95,6 @@ export default class Clip {
                 this.activeFace = face;
             }
         } else {
-            console.log('2')
             if (this.activeFace) {
                 this.activeFace.setActive(false);
                 this.activeFace = null;
@@ -118,7 +118,7 @@ export default class Clip {
 
     axis = '' // 轴线
     point = new Vector3() // 起点
-    ground = new Mesh(new PlaneGeometry(1000000, 1000000), new MeshBasicMaterial({ colorWrite: false, depthWrite: false })),
+    ground = new Mesh(new PlaneGeometry(1000000, 1000000), new MeshBasicMaterial({ colorWrite: false, depthWrite: false }))
         
     dragStart = (axis: string, point: Vector3) => {
         this.axis = axis;
@@ -204,21 +204,15 @@ export default class Clip {
                 break;
         }
 
-        console.log('axis', this.axis)
-        console.log('low', this.clipBox.low, 'high', this.clipBox.high)
-        console.log('init low', this.clipBox.low_init, 'high', this.clipBox.high_init)
+        // 更新剖切盒的剖切平面、顶点、面和边线\
+        this.clipBox.clearFaces()
+        this.clipBox.clearLines()
 
-        // 更新剖切盒的剖切平面、顶点、面和边线
-        this.clipBox.initPlanes();
-        this.clipBox.initVertices();
-        this.clipBox.faces.forEach((face: any) => {
-            face.geometry.verticesNeedUpdate = true;
-            face.geometry.computeBoundingBox();
-            face.geometry.computeBoundingSphere();
-        })
-        this.clipBox.lines.forEach((line: any) => {
-            line.geometry.verticesNeedUpdate = true;
-        })
+
+        this.clipBox.initVertices()
+        this.clipBox.initFaces()
+        this.clipBox.initLines()
+        this.clipBox.initPlanes()
 
         // 更新覆盖盒
         this.updateCapBoxList();
@@ -242,6 +236,36 @@ export default class Clip {
             item.capBox.position.copy(position);
         })
     }
+
+    stencilTest() {
+        this.renderer.clear(); // 清除模板缓存
+        const gl = this.renderer.getContext();
+        gl.enable(gl.STENCIL_TEST);
+        this.capBoxList.forEach((item, index) => {
+
+            // 初始化模板缓冲值，每层不一样
+            gl.stencilFunc(gl.ALWAYS, index, 0xff);
+            gl.stencilOp(gl.KEEP, gl.KEEP, gl.REPLACE);
+            this.renderer.render(item.backScene, this.camera);
+
+            // 背面加1
+            gl.stencilFunc(gl.ALWAYS, 1, 0xff);
+            gl.stencilOp(gl.KEEP, gl.KEEP, gl.INCR);
+            this.renderer.render(item.backScene, this.camera);
+
+            // 正面减1
+            gl.stencilFunc(gl.ALWAYS, 1, 0xff);
+            gl.stencilOp(gl.KEEP, gl.KEEP, gl.DECR);
+            this.renderer.render(item.frontScene, this.camera);
+
+            // 缓冲区为指定值，才显示覆盖盒
+            gl.stencilFunc(gl.LEQUAL, index + 1, 0xff);
+            gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+            this.renderer.render(item.capBoxScene, this.camera);
+        })
+
+        gl.disable(gl.STENCIL_TEST);
+    }
 }
 
 class ClipBox {
@@ -249,11 +273,13 @@ class ClipBox {
     public high: Vector3 = new Vector3(); // 最高点
     public low_init: Vector3 = new Vector3();
     public high_init: Vector3 = new Vector3();
-    private group: Group = new Group();; // 记录开启剖切后添加的所有对象
-    private planes: Array<Plane> = []; // 剖切平面
+    public group: Group = new Group();; // 记录开启剖切后添加的所有对象
+    public planes: Array<Plane> = []; // 剖切平面
     private vertices: number[] = []
-    public faces: Array<BoxFace> = [];
-    public lines: Array<BoxLine> = [];
+    public faces: Array<BoxFace> = []
+    public lines: Array<BoxLine> = []
+
+    public planeObjects = []
 
     private obj: Object3D;
     private scene: Scene;
@@ -267,18 +293,23 @@ class ClipBox {
     }
 
     public init(): void {
+        
         const box3 = new Box3();
         box3.setFromObject(this.obj); // 获取模型对象的边界
         this.low = box3.min;
         this.high = box3.max;
         this.low_init.copy(this.low); // 保留一下初始值，好作为限制条件
         this.high_init.copy(this.high);
-        this.group = new Group();
+        this.scene.add(this.obj)
+        this.group = new Group()
         this.initPlanes();
         this.initVertices();
         this.initFaces();
         this.initLines();
-        this.scene.add(this.group);
+        this.scene.add(this.group)
+
+        console.log('low', this.low, 'high', this.high)
+        
     }
 
     public clear(): void {
@@ -301,11 +332,12 @@ class ClipBox {
             new Plane(new Vector3(0, 0, -1), this.high.z), // 前
             new Plane(new Vector3(0, 0, 1), -this.low.z), // 后
         );
-        this.obj.traverse((child: any) => {
-            if (['Mesh', 'LineSegments'].includes(child.type)) {
-                child.material.clippingPlanes = this.planes;
-            }
-        });
+        // this.obj.traverse((child: any) => {
+        //     if (['Mesh', 'LineSegments'].includes(child.type)) {
+        //         child.material.clippingPlanes = this.planes;
+        //     }
+        // })
+         this.obj.material.clippingPlanes = this.planes
     }
 
     public initVertices(): void {
@@ -319,8 +351,6 @@ class ClipBox {
             this.high.x, this.low.y, this.high.z,        // 6
             this.low.x, this.low.y, this.high.z          // 7
         ]
-
-        console.log('init', this.vertices)
     }
 
     public initFaces(): void {
@@ -379,6 +409,25 @@ class ClipBox {
         });
     }
 
+    public clearPlanes(): void {
+        this.planes = []
+    }
+
+    public clearFaces(): void {
+        this.faces.forEach((face) => {
+            this.group.remove(face.backFace)
+            this.group.remove(face)
+            face.clear()
+        })
+    }
+
+    public clearLines(): void {
+        this.lines.forEach((line) => {
+            this.group.remove(line)
+            line.clear()
+        })
+    }
+
     public initLines(): void {
         const v = this.vertices;
         const f = this.faces;
@@ -399,6 +448,12 @@ class ClipBox {
         );
         this.group.add(...this.lines);
     }
+
+    public createObj(mesh: Mesh) {
+        const planeGeom = new THREE.PlaneBufferGeometry(100, 100);
+        this.scene.add(mesh)
+    }
+
 }
 
 /**类：用于构造剖切盒的边线 */
@@ -451,7 +506,6 @@ class BoxFace extends Mesh {
         this.geometry = new BufferGeometry();
         this.geometry.setAttribute('position', new BufferAttribute(new Float32Array(vertices), 3))
         this.geometry.setIndex( [0, 3, 2, 0, 2, 1] )
-        this.geometry.computeVertexNormals();
         this.material = new MeshBasicMaterial({ colorWrite: false, depthWrite: false });
         const backMaterial = new MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.2, side: BackSide });
         this.backFace = new Mesh(this.geometry, backMaterial);
