@@ -10,13 +10,16 @@ const canvas: HTMLCanvasElement | null = document.getElementById('canvas') as HT
 // const fbx: FbxApplication = new FbxApplication(canvas)
 // fbx.run()
 
-const ma = new MAEngine(canvas)
+const ma = new MAEngine({ 
+    containerId: 'canvas',
+    controls: true 
+})
 ma.run()
 // ma.loadFbx('public/fbx/Samba Dancing.fbx')
 ma.loadGltf('LeePerrySmith.glb')
     .then((mesh) => {
-        ma.openClip(mesh)
-
+        // ma.openClip(mesh)
+        ma.controls?.fitToBox(mesh, true)
     })
 
 // ma.loadFbx('public/fbx/Samba Dancing.fbx')
@@ -24,3 +27,5 @@ ma.loadGltf('LeePerrySmith.glb')
 //     ma.openClip()
 
 // })
+
+window['ma'] = ma

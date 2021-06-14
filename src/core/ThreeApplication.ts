@@ -1,34 +1,37 @@
 import * as THREE from 'three'
-import { OrbitControls } from 'three-orbitcontrols-ts'
+
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader'
 import { RoughnessMipmapper } from 'three/examples/jsm/utils/RoughnessMipmapper'
 
 import { Application } from './Application'
+import CameraController from './controller/CameraController'
 import { MaConfigType } from './MAEngine'
 import Clip from '../lib/Clip'
 
+
+
 export default class ThreeApplication extends Application {
 
-    camera: THREE.Camera | null = null
+    camera: THREE.PerspectiveCamera | THREE.OrthographicCamera | null = null
     scene: THREE.Scene | null = null
     renderer: THREE.WebGLRenderer | null = null
     mixer: THREE.AnimationMixer | null = null
     hemiLight: THREE.HemisphereLight | null = null
     dirLight: THREE.DirectionalLight | null = null
     clock: THREE.Clock | null = null
-    control: OrbitControls | null = null
+    controls: CameraController | null = null
     config: MaConfigType| null = null
     clip: Clip | null = null
 
-    constructor(canvas: HTMLCanvasElement, config: MaConfigType) {
-        super(canvas)
+    constructor( config: MaConfigType) {
+        super(config.containerId)
         this.config = config
 
         this.initThree()
 
-        if (config.control) {
+        if (config.controls) {
             this.stupControl()
         }
     }
@@ -37,7 +40,7 @@ export default class ThreeApplication extends Application {
     private initThree(): void {
         
         this.camera = new THREE.PerspectiveCamera( 45, this.canvas.width / this.canvas.height, 0.5, 200);
-        this.camera.position.set( - 18, 6, 3.7  )
+        this.camera.position.set( 0, 0, 20  )
 
         this.scene = new THREE.Scene()
         this.scene.background = new THREE.Color( 0xa0a0a0 );
@@ -64,6 +67,7 @@ export default class ThreeApplication extends Application {
 
         const ax = new THREE.AxesHelper(1000)
         this.scene.add(ax)
+        this._render()
     }
 
     public stupControl(): void {
@@ -71,8 +75,11 @@ export default class ThreeApplication extends Application {
             throw new Error('camera is null')
         }
 
-        this.control = new OrbitControls(this.camera, this.renderer?.domElement)
-        this.control.enableZoom = true
+        if (!this.renderer) {
+            throw new Error('render is nul')
+        }
+
+        this.controls = new CameraController( this.camera, this.renderer )
     }
 
     public loadFbx(url: string): Promise<void> {
@@ -98,6 +105,7 @@ export default class ThreeApplication extends Application {
                 } )
 
                 that.scene?.add( object );
+                that._render()
                 resolve()
 
             } )
@@ -122,6 +130,8 @@ export default class ThreeApplication extends Application {
                     if ( child.isMesh ) {
 
                         resolve(child)
+                        that.scene.add(child)
+                        that._render()
 
                     }
 
@@ -130,22 +140,22 @@ export default class ThreeApplication extends Application {
 
                 roughnessMipmapper.dispose();
 
-            } );
+            } )
         })
     }
 
     public openClip(mesh: THREE.Mesh): void {
-        if (!this.scene || !this.renderer || !this.camera || !this.control) return
+        if (!this.scene || !this.renderer || !this.camera || !this.controls) return
 
         this.renderer.localClippingEnabled = true
         this.renderer.autoClear = false
-        this.clip = new Clip(mesh, this, this.scene, this.renderer, this.camera, this.control)
+        this.clip = new Clip(mesh, this, this.scene, this.renderer, this.camera, this.controls)
         this.clip.open()
     }
 
     public render(): void {
         if (this.scene && this.camera) {
-            const delta = this.clock?.getDelta();
+            const delta: number = this.clock?.getDelta() as number
 
             // const planeObjects = this.clip?.clipBox.planeObjects
             // const planes = this.clip?.clipBox.planes
@@ -165,9 +175,24 @@ export default class ThreeApplication extends Application {
             // }
 
 			if ( this.mixer ) this.mixer.update( delta! )
-            this.renderer?.render( this.scene, this.camera )
-
+            const hasControlsUpdated = this.controls?.update( delta )
+            if (hasControlsUpdated) {
+                this._render()
+            }
             
         }
     }    
+
+    private _render(): void {
+        if (this.scene && this.camera) { 
+            this.renderer?.render( this.scene, this.camera )
+        }
+    }
+
+    public clear(): void {
+        if(this.scene) {
+            this.scene.clear()
+            this._render()
+        }
+    }
 }

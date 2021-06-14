@@ -300,7 +300,7 @@ class ClipBox {
         this.high = box3.max;
         this.low_init.copy(this.low); // 保留一下初始值，好作为限制条件
         this.high_init.copy(this.high);
-        this.scene.add(this.obj)
+        // this.scene.add(this.obj)
         this.group = new Group()
         this.initPlanes();
         this.initVertices();

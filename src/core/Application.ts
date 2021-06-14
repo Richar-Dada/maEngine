@@ -131,8 +131,8 @@ export class Application implements EventListenerObject {
     // 声明每帧回调函数
     public frameCallback: ( ( app: Application ) => void ) | null;
 
-    constructor(canvas: HTMLCanvasElement) {
-        this.canvas = canvas
+    constructor(containerId: string) {
+        this.canvas = document.getElementById(containerId) as HTMLCanvasElement
 
         // canvas元素能够监听鼠标事件
         // this.canvas.addEventListener( "mousedown", this, false );

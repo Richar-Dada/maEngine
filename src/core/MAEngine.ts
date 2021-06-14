@@ -1,16 +1,18 @@
 import ThreeApplication from './ThreeApplication'
 
 export interface MaConfigType {
-    control: boolean
+    containerId: string
+    controls?: boolean
 }
 
 const baseConfig: MaConfigType = {
-    control: true
+    containerId: '',
+    controls: true
 }
 
 export default class MAEngine extends ThreeApplication {
-    constructor(canvas: HTMLCanvasElement, config: MaConfigType = baseConfig) {
-        super(canvas, config)
+    constructor(config: MaConfigType = baseConfig) {
+        super(config)
     }
 
     
